@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
+import API_BASE_URL from './config'
 import './App.css'
 
 interface Document {
@@ -28,7 +29,7 @@ function SearchPage() {
     setDocument(null);
 
     try {
-      const response = await fetch(`http://localhost:3000/api/search/${referenceId}`);
+      const response = await fetch(`${API_BASE_URL}/api/search/${referenceId}`);
       const data = await response.json();
 
       if (data.success) {
@@ -73,7 +74,7 @@ function SearchPage() {
           <p><strong>Content:</strong></p>
           <p>{document.content}</p>
           {document.pdfPath && (
-            <p><a href={`http://localhost:3000${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
+            <p><a href={`${API_BASE_URL}${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
           )}
         </div>
       )}
@@ -94,7 +95,7 @@ function AdminPanel() {
 
   const fetchDocuments = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/documents');
+      const response = await fetch(`${API_BASE_URL}/api/documents`);
       const data = await response.json();
       if (data.success) {
         setDocuments(data.documents);
@@ -118,7 +119,7 @@ function AdminPanel() {
     }
 
     try {
-      const response = await fetch('http://localhost:3000/api/documents', {
+      const response = await fetch(`${API_BASE_URL}/api/documents`, {
         method: 'POST',
         body: formDataToSend
       });
@@ -143,7 +144,7 @@ function AdminPanel() {
     if (!confirm('Are you sure you want to delete this document?')) return;
 
     try {
-      const response = await fetch(`http://localhost:3000/api/documents/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/documents/${id}`, {
         method: 'DELETE'
       });
       const data = await response.json();
