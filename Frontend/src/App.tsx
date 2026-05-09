@@ -1,8 +1,68 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
 import API_BASE_URL from './config'
 import './App.css'
 
+const ApiContext = createContext<{ apiUrl: string; setApiUrl: (url: string) => void }>({
+  apiUrl: API_BASE_URL,
+  setApiUrl: () => {}
+});
+
+function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const { apiUrl, setApiUrl } = useContext(ApiContext);
+  const [tempUrl, setTempUrl] = useState(apiUrl);
+  const [testStatus, setTestStatus] = useState<string>('');
+
+  const handleTest = async () => {
+    try {
+      setTestStatus('Testing...');
+      const response = await fetch(`${tempUrl}/api/documents`);
+      if (response.ok) {
+        setTestStatus('✅ Connection successful!');
+      } else {
+        setTestStatus('❌ Server responded with error');
+      }
+    } catch (error) {
+      setTestStatus('❌ Cannot connect to server');
+    }
+  };
+
+  const handleSave = () => {
+    if (tempUrl.trim()) {
+      setApiUrl(tempUrl);
+      localStorage.setItem('apiUrl', tempUrl);
+      onClose();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>API Settings</h2>
+        <p>Configure your backend server URL:</p>
+        <input
+          type="text"
+          placeholder="http://localhost:3000 or http://your-ip:3000"
+          value={tempUrl}
+          onChange={(e) => setTempUrl(e.target.value)}
+          className="settings-input"
+        />
+        <div className="modal-buttons">
+          <button onClick={handleTest} className="test-btn">Test Connection</button>
+          <button onClick={handleSave} className="save-btn">Save</button>
+          <button onClick={onClose} className="cancel-btn">Cancel</button>
+        </div>
+        {testStatus && <p className={testStatus.includes('✅') ? 'success' : 'error'}>{testStatus}</p>}
+      </div>
+    </div>
+  );
+}
+
+function useApi() {
+  return useContext(ApiContext);
+}
 interface Document {
   _id?: string;
   referenceId: string;
@@ -13,6 +73,7 @@ interface Document {
 }
 
 function SearchPage() {
+  const { apiUrl } = useApi();
   const [referenceId, setReferenceId] = useState<string>('');
   const [document, setDocument] = useState<Document | null>(null);
   const [error, setError] = useState<string>('');
@@ -29,7 +90,7 @@ function SearchPage() {
     setDocument(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/search/${referenceId}`);
+      const response = await fetch(`${apiUrl}/api/search/${referenceId}`);
       const data = await response.json();
 
       if (data.success) {
@@ -39,7 +100,7 @@ function SearchPage() {
       }
     } catch (err) {
       console.error(err);
-      setError('Failed to fetch document. Please try again.');
+      setError('Failed to fetch document. Please check API settings (⚙️ button).');
     } finally {
       setLoading(false);
     }
@@ -74,7 +135,7 @@ function SearchPage() {
           <p><strong>Content:</strong></p>
           <p>{document.content}</p>
           {document.pdfPath && (
-            <p><a href={`${API_BASE_URL}${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
+            <p><a href={`${apiUrl}${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
           )}
         </div>
       )}
@@ -83,6 +144,7 @@ function SearchPage() {
 }
 
 function AdminPanel() {
+  const { apiUrl } = useApi();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [formData, setFormData] = useState({
     referenceId: '',
@@ -92,10 +154,11 @@ function AdminPanel() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
 
   const fetchDocuments = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/documents`);
+      const response = await fetch(`${apiUrl}/api/documents`);
       const data = await response.json();
       if (data.success) {
         setDocuments(data.documents);
@@ -119,7 +182,7 @@ function AdminPanel() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/documents`, {
+      const response = await fetch(`${apiUrl}/api/documents`, {
         method: 'POST',
         body: formDataToSend
       });
@@ -131,10 +194,10 @@ function AdminPanel() {
         setPdfFile(null);
         fetchDocuments();
       } else {
-        setMessage(data.message);
+        setMessage(data.message || 'Failed to add document');
       }
     } catch (error) {
-      setMessage('Failed to add document');
+      setMessage('Failed to add document. Check API settings.');
     } finally {
       setLoading(false);
     }
@@ -144,7 +207,7 @@ function AdminPanel() {
     if (!confirm('Are you sure you want to delete this document?')) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/documents/${id}`, {
+      const response = await fetch(`${apiUrl}/api/documents/${id}`, {
         method: 'DELETE'
       });
       const data = await response.json();
@@ -162,14 +225,17 @@ function AdminPanel() {
 
   useEffect(() => {
     fetchDocuments();
-  }, []);
+  }, [apiUrl]);
 
   return (
     <div className="app">
       <nav className="navbar">
         <Link to="/" className="back-link">← Back to Search</Link>
         <h1>Admin Panel</h1>
+        <button onClick={() => setShowSettings(true)} className="settings-btn" title="Configure API">⚙️</button>
       </nav>
+
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
       <div className="admin-container">
         <div className="add-document">
@@ -227,13 +293,19 @@ function AdminPanel() {
   );
 }
 
-function App() {
+function AppWrapper() {
+  const [apiUrl, setApiUrl] = useState<string>(() => {
+    return localStorage.getItem('apiUrl') || API_BASE_URL;
+  });
+
   return (
-    <Routes>
-      <Route path="/" element={<SearchPage />} />
-      <Route path="/admin" element={<AdminPanel />} />
-    </Routes>
+    <ApiContext.Provider value={{ apiUrl, setApiUrl }}>
+      <Routes>
+        <Route path="/" element={<SearchPage />} />
+        <Route path="/admin" element={<AdminPanel />} />
+      </Routes>
+    </ApiContext.Provider>
   );
 }
 
-export default App
+export default AppWrapper
