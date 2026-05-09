@@ -1,0 +1,9 @@
+# Ignore local Node modules and environment files
+node_modules/
+Backend/node_modules/
+Backend/.env
+Backend/uploads/
+Frontend/dist/
+
+# Ignore IDE/editor files
+.vscode/
