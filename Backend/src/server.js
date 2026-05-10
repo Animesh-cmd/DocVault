@@ -82,6 +82,13 @@ app.get('/api/documents', async (req, res) => {
 app.post('/api/documents', upload.single('pdf'), async (req, res) => {
   try {
     const { referenceId, title, content } = req.body;
+    
+    // Validate required fields
+    if (!referenceId || !title || !content) {
+      console.log('Missing required fields:', { referenceId, title, content });
+      return res.status(400).json({ success: false, message: 'Reference ID, title, and content are required' });
+    }
+    
     const pdfPath = req.file ? `/uploads/${req.file.filename}` : null;
 
     const newDocument = new Document({
@@ -92,12 +99,14 @@ app.post('/api/documents', upload.single('pdf'), async (req, res) => {
     });
 
     await newDocument.save();
+    console.log('Document added successfully:', referenceId);
     res.json({ success: true, message: 'Document added successfully' });
   } catch (error) {
+    console.error('Error adding document:', error.message);
     if (error.code === 11000) {
       res.status(400).json({ success: false, message: 'Reference ID already exists' });
     } else {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: `Server error: ${error.message}` });
     }
   }
 });

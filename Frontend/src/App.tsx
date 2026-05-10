@@ -90,17 +90,23 @@ function SearchPage() {
     setDocument(null);
 
     try {
+      console.log('Searching with API:', apiUrl);
       const response = await fetch(`${apiUrl}/api/search/${referenceId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
 
       if (data.success) {
         setDocument(data.document);
       } else {
-        setError(data.message);
+        setError(data.message || 'Document not found');
       }
     } catch (err) {
-      console.error(err);
-      setError('Failed to fetch document. Please check API settings (⚙️ button).');
+      console.error('Search error:', err);
+      setError(`Failed to fetch document: ${err instanceof Error ? err.message : 'Unknown error'}. Check API settings (⚙️)`);
     } finally {
       setLoading(false);
     }
@@ -158,7 +164,13 @@ function AdminPanel() {
 
   const fetchDocuments = async () => {
     try {
+      console.log('Fetching documents from:', apiUrl);
       const response = await fetch(`${apiUrl}/api/documents`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
       if (data.success) {
         setDocuments(data.documents);
@@ -173,6 +185,12 @@ function AdminPanel() {
     setLoading(true);
     setMessage('');
 
+    if (!formData.referenceId || !formData.title || !formData.content) {
+      setMessage('Please fill in all required fields (Reference ID, Title, Content)');
+      setLoading(false);
+      return;
+    }
+
     const formDataToSend = new FormData();
     formDataToSend.append('referenceId', formData.referenceId);
     formDataToSend.append('title', formData.title);
@@ -182,11 +200,18 @@ function AdminPanel() {
     }
 
     try {
+      console.log('Sending to API:', apiUrl, formData);
       const response = await fetch(`${apiUrl}/api/documents`, {
         method: 'POST',
         body: formDataToSend
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      console.log('Response:', data);
 
       if (data.success) {
         setMessage('Document added successfully!');
@@ -197,7 +222,8 @@ function AdminPanel() {
         setMessage(data.message || 'Failed to add document');
       }
     } catch (error) {
-      setMessage('Failed to add document. Check API settings.');
+      console.error('Error adding document:', error);
+      setMessage(`Failed to add document: ${error instanceof Error ? error.message : 'Unknown error'}. Verify API URL (⚙️).`);
     } finally {
       setLoading(false);
     }
