@@ -5,6 +5,8 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,17 +42,34 @@ const documentSchema = new mongoose.Schema({
 
 const Document = mongoose.model('Document', documentSchema);
 
-// Multer configuration for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '../uploads'));
+// Cloudinary configuration
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Multer configuration for file uploads using Cloudinary
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'documents',
+    format: async (req, file) => 'pdf',
+    public_id: (req, file) => Date.now() + '-' + Math.round(Math.random() * 1E9)
   },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
 });
 
 const upload = multer({ storage });
+
+// Helper to extract Cloudinary public ID
+const getPublicIdFromUrl = (url) => {
+  if (!url || !url.includes('cloudinary.com')) return null;
+  const parts = url.split('/');
+  const filename = parts.pop();
+  const folder = parts.pop();
+  const publicIdWithExt = `${folder}/${filename}`;
+  return publicIdWithExt.replace(/\.[^/.]+$/, '');
+};
 
 // Search endpoint
 app.get('/api/search/:referenceId', async (req, res) => {
@@ -89,7 +108,7 @@ app.post('/api/documents', upload.single('pdf'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'Reference ID, title, and content are required' });
     }
     
-    const pdfPath = req.file ? `/uploads/${req.file.filename}` : null;
+    const pdfPath = req.file ? req.file.path : null;
 
     const newDocument = new Document({
       referenceId,
@@ -116,7 +135,15 @@ app.put('/api/documents/:id', upload.single('pdf'), async (req, res) => {
   try {
     const { id } = req.params;
     const { referenceId, title, content } = req.body;
-    const pdfPath = req.file ? `/uploads/${req.file.filename}` : undefined;
+    const pdfPath = req.file ? req.file.path : undefined;
+
+    const document = await Document.findById(id);
+    if (!document) return res.status(404).json({ success: false, message: 'Document not found' });
+
+    if (pdfPath && document.pdfPath) {
+      const publicId = getPublicIdFromUrl(document.pdfPath);
+      if (publicId) await cloudinary.uploader.destroy(publicId);
+    }
 
     const updateData = { referenceId, title, content };
     if (pdfPath) updateData.pdfPath = pdfPath;
@@ -132,6 +159,11 @@ app.put('/api/documents/:id', upload.single('pdf'), async (req, res) => {
 app.delete('/api/documents/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const document = await Document.findById(id);
+    if (document && document.pdfPath) {
+      const publicId = getPublicIdFromUrl(document.pdfPath);
+      if (publicId) await cloudinary.uploader.destroy(publicId);
+    }
     await Document.findByIdAndDelete(id);
     res.json({ success: true, message: 'Document deleted successfully' });
   } catch (error) {

@@ -4,6 +4,7 @@ Backend/node_modules/
 Backend/.env
 Backend/uploads/
 Frontend/dist/
+Frontend/.env.local
 
 # Ignore IDE/editor files
 .vscode/

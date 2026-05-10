@@ -16,14 +16,25 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
   const handleTest = async () => {
     try {
       setTestStatus('Testing...');
-      const response = await fetch(`${tempUrl}/api/documents`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(`${tempUrl}/api/documents`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      
       if (response.ok) {
         setTestStatus('✅ Connection successful!');
       } else {
-        setTestStatus('❌ Server responded with error');
+        setTestStatus(`❌ Server error (${response.status})`);
       }
     } catch (error) {
-      setTestStatus('❌ Cannot connect to server');
+      if (error instanceof Error && error.name === 'AbortError') {
+        setTestStatus('❌ Connection timeout - check if backend is running');
+      } else {
+        setTestStatus('❌ Cannot connect to server');
+      }
     }
   };
 
@@ -31,8 +42,14 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
     if (tempUrl.trim()) {
       setApiUrl(tempUrl);
       localStorage.setItem('apiUrl', tempUrl);
+      console.log('API URL saved:', tempUrl);
       onClose();
     }
+  };
+
+  const handleReset = () => {
+    localStorage.removeItem('apiUrl');
+    window.location.reload();
   };
 
   if (!isOpen) return null;
@@ -41,7 +58,8 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>API Settings</h2>
-        <p>Configure your backend server URL:</p>
+        <p className="info-text">Current API URL: <code>{apiUrl}</code></p>
+        <p>Backend is automatically detected. Change only if needed:</p>
         <input
           type="text"
           placeholder="http://localhost:3000 or http://your-ip:3000"
@@ -52,6 +70,7 @@ function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
         <div className="modal-buttons">
           <button onClick={handleTest} className="test-btn">Test Connection</button>
           <button onClick={handleSave} className="save-btn">Save</button>
+          <button onClick={handleReset} className="reset-btn">Reset to Default</button>
           <button onClick={onClose} className="cancel-btn">Cancel</button>
         </div>
         {testStatus && <p className={testStatus.includes('✅') ? 'success' : 'error'}>{testStatus}</p>}
@@ -141,7 +160,7 @@ function SearchPage() {
           <p><strong>Content:</strong></p>
           <p>{document.content}</p>
           {document.pdfPath && (
-            <p><a href={`${apiUrl}${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
+            <p><a href={document.pdfPath.startsWith('http') ? document.pdfPath : `${apiUrl}${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
           )}
         </div>
       )}
@@ -206,6 +225,8 @@ function AdminPanel() {
         body: formDataToSend
       });
       
+      console.log('Response status:', response.status, response.statusText);
+      
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -222,8 +243,10 @@ function AdminPanel() {
         setMessage(data.message || 'Failed to add document');
       }
     } catch (error) {
-      console.error('Error adding document:', error);
-      setMessage(`Failed to add document: ${error instanceof Error ? error.message : 'Unknown error'}. Verify API URL (⚙️).`);
+      console.error('Full error object:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('Error message:', errorMessage);
+      setMessage(`Failed to add document: ${errorMessage}. Verify API URL (⚙️).`);
     } finally {
       setLoading(false);
     }
@@ -250,6 +273,7 @@ function AdminPanel() {
   };
 
   useEffect(() => {
+    console.log('AdminPanel mounted with API URL:', apiUrl);
     fetchDocuments();
   }, [apiUrl]);
 
@@ -321,7 +345,24 @@ function AdminPanel() {
 
 function AppWrapper() {
   const [apiUrl, setApiUrl] = useState<string>(() => {
-    return localStorage.getItem('apiUrl') || API_BASE_URL;
+    const savedUrl = localStorage.getItem('apiUrl');
+    
+    // Check if saved URL is a stale IP address that won't work
+    if (savedUrl && savedUrl.includes('10.123.17.183')) {
+      console.warn('Removing stale API URL from localStorage:', savedUrl);
+      localStorage.removeItem('apiUrl');
+      return API_BASE_URL;
+    }
+    
+    const url = savedUrl || API_BASE_URL;
+    console.log('Initializing API URL:', {
+      saved: savedUrl,
+      default: API_BASE_URL,
+      using: url,
+      hostname: window.location.hostname,
+      protocol: window.location.protocol
+    });
+    return url;
   });
 
   return (
