@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext } from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
-import API_BASE_URL from './config'
+import API_BASE_URL from './config.js'
 import './App.css'
 
 const ApiContext = createContext<{ apiUrl: string; setApiUrl: (url: string) => void }>({

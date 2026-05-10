@@ -6,10 +6,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,9 +20,14 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI)
-.then(() => console.log('Connected to MongoDB'))
-.catch(err => console.error('MongoDB connection error:', err));
+const mongoUri = process.env.MONGODB_URI;
+if (!mongoUri) {
+  console.error('Missing MONGODB_URI in environment. Check Backend/.env and dotenv path.');
+} else {
+  mongoose.connect(mongoUri)
+    .then(() => console.log('Connected to MongoDB'))
+    .catch(err => console.error('MongoDB connection error:', err));
+}
 
 // Document Schema
 const documentSchema = new mongoose.Schema({
@@ -125,6 +130,6 @@ app.delete('/api/documents/:id', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
