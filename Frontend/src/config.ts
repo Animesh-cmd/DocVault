@@ -1,30 +1,28 @@
 // API Configuration
-// Automatically detects backend URL based on frontend's hostname
-// For localhost development: http://localhost:3000
-// For network access: automatically uses same host as frontend
+// Automatically detects backend URL based on environment and hostname
 
 function getDefaultApiUrl(): string {
-  // 1. Check environment variable first (highest priority)
+  // 1. Check environment variable (highest priority)
+  // Set this in your Vercel/Hosting provider environment variables
   const env = import.meta.env.VITE_API_BASE_URL;
   if (env) return env;
 
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
 
-  // 2. If running on localhost, use localhost:3000
+  // 2. Local development
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return 'http://localhost:3000';
   }
 
-  // 3. If running on a cloud platform (like Vercel), don't assume port 3000
-  // Instead, use the same host and protocol (standard for same-origin or proxy setups)
-  if (hostname.includes('vercel.app') || hostname.includes('herokuapp') || hostname.includes('render.com')) {
-    return `${protocol}//${hostname}`;
+  // 3. Network testing (e.g., accessing via phone on same WiFi)
+  // Assumes backend is on the same machine on port 3000
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+    return `http://${hostname}:3000`;
   }
 
-  // 4. Fallback for local network access (e.g., http://192.168.1.5:5173)
-  // Assumes backend is on the same machine on port 3000
-  return `http://${hostname}:3000`;
+  // 4. Production fallback: use same host (works if backend is proxied or same-origin)
+  return `${protocol}//${hostname}`;
 }
 
 const API_BASE_URL = getDefaultApiUrl();

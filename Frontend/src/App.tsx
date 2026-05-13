@@ -1,87 +1,8 @@
-import { useState, useEffect, createContext, useContext } from 'react'
+import { useState, useEffect } from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
 import API_BASE_URL from './config.js'
 import './App.css'
 
-const ApiContext = createContext<{ apiUrl: string; setApiUrl: (url: string) => void }>({
-  apiUrl: API_BASE_URL,
-  setApiUrl: () => {}
-});
-
-function SettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const { apiUrl, setApiUrl } = useContext(ApiContext);
-  const [tempUrl, setTempUrl] = useState(apiUrl);
-  const [testStatus, setTestStatus] = useState<string>('');
-
-  const handleTest = async () => {
-    try {
-      setTestStatus('Testing...');
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const response = await fetch(`${tempUrl}/api/documents`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      
-      if (response.ok) {
-        setTestStatus('✅ Connection successful!');
-      } else {
-        setTestStatus(`❌ Server error (${response.status})`);
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        setTestStatus('❌ Connection timeout - check if backend is running');
-      } else {
-        setTestStatus('❌ Cannot connect to server');
-      }
-    }
-  };
-
-  const handleSave = () => {
-    if (tempUrl.trim()) {
-      setApiUrl(tempUrl);
-      localStorage.setItem('apiUrl', tempUrl);
-      console.log('API URL saved:', tempUrl);
-      onClose();
-    }
-  };
-
-  const handleReset = () => {
-    localStorage.removeItem('apiUrl');
-    window.location.reload();
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>API Settings</h2>
-        <p className="info-text">Current API URL: <code>{apiUrl}</code></p>
-        <p>Backend is automatically detected. Change only if needed:</p>
-        <input
-          type="text"
-          placeholder="http://localhost:3000 or http://your-ip:3000"
-          value={tempUrl}
-          onChange={(e) => setTempUrl(e.target.value)}
-          className="settings-input"
-        />
-        <div className="modal-buttons">
-          <button onClick={handleTest} className="test-btn">Test Connection</button>
-          <button onClick={handleSave} className="save-btn">Save</button>
-          <button onClick={handleReset} className="reset-btn">Reset to Default</button>
-          <button onClick={onClose} className="cancel-btn">Cancel</button>
-        </div>
-        {testStatus && <p className={testStatus.includes('✅') ? 'success' : 'error'}>{testStatus}</p>}
-      </div>
-    </div>
-  );
-}
-
-function useApi() {
-  return useContext(ApiContext);
-}
 interface Document {
   _id?: string;
   referenceId: string;
@@ -92,7 +13,7 @@ interface Document {
 }
 
 function SearchPage() {
-  const { apiUrl } = useApi();
+  const apiUrl = API_BASE_URL;
   const [referenceId, setReferenceId] = useState<string>('');
   const [document, setDocument] = useState<Document | null>(null);
   const [error, setError] = useState<string>('');
@@ -125,7 +46,7 @@ function SearchPage() {
       }
     } catch (err) {
       console.error('Search error:', err);
-      setError(`Failed to fetch document: ${err instanceof Error ? err.message : 'Unknown error'}. Check API settings (⚙️)`);
+      setError(`Failed to fetch document: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -169,7 +90,7 @@ function SearchPage() {
 }
 
 function AdminPanel() {
-  const { apiUrl } = useApi();
+  const apiUrl = API_BASE_URL;
   const [documents, setDocuments] = useState<Document[]>([]);
   const [formData, setFormData] = useState({
     referenceId: '',
@@ -179,7 +100,6 @@ function AdminPanel() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
 
   const fetchDocuments = async () => {
     try {
@@ -254,7 +174,7 @@ function AdminPanel() {
       const errorMessage = error instanceof Error ? error.message : String(error);
       
       if (errorMessage === 'Failed to fetch') {
-        setMessage(`Failed to connect to API. Please check your network and API URL (⚙️). Currently using: ${apiUrl}`);
+        setMessage(`Failed to connect to API. Please ensure the backend is running at ${apiUrl}`);
       } else {
         setMessage(`Error: ${errorMessage}`);
       }
@@ -293,10 +213,7 @@ function AdminPanel() {
       <nav className="navbar">
         <Link to="/" className="back-link">← Back to Search</Link>
         <h1>Admin Panel</h1>
-        <button onClick={() => setShowSettings(true)} className="settings-btn" title="Configure API">⚙️</button>
       </nav>
-
-      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
       <div className="admin-container">
         <div className="add-document">
@@ -354,33 +271,13 @@ function AdminPanel() {
   );
 }
 
-function AppWrapper() {
-  const [apiUrl, setApiUrl] = useState<string>(() => {
-    const savedUrl = localStorage.getItem('apiUrl');
-    
-    // Check if saved URL is an IP address while we are on localhost
-    // This often happens when switching networks
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isSavedUrlIP = savedUrl && /http:\/\/\d+\.\d+\.\d+\.\d+/.test(savedUrl);
-    
-    if (isLocal && isSavedUrlIP && !savedUrl.includes('localhost') && !savedUrl.includes('127.0.0.1')) {
-      console.warn('Removing potentially stale IP API URL from localStorage:', savedUrl);
-      localStorage.removeItem('apiUrl');
-      return API_BASE_URL;
-    }
-    
-    const url = savedUrl || API_BASE_URL;
-    return url;
-  });
-
+function App() {
   return (
-    <ApiContext.Provider value={{ apiUrl, setApiUrl }}>
-      <Routes>
-        <Route path="/" element={<SearchPage />} />
-        <Route path="/admin" element={<AdminPanel />} />
-      </Routes>
-    </ApiContext.Provider>
+    <Routes>
+      <Route path="/" element={<SearchPage />} />
+      <Route path="/admin" element={<AdminPanel />} />
+    </Routes>
   );
 }
 
-export default AppWrapper
+export default App
