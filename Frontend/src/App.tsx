@@ -87,7 +87,7 @@ interface Document {
   referenceId: string;
   title: string;
   content: string;
-  pdfPath?: string;
+  pdfFile?: { contentType: string };
   createdAt: string;
 }
 
@@ -159,8 +159,8 @@ function SearchPage() {
           <p><strong>Created At:</strong> {document.createdAt}</p>
           <p><strong>Content:</strong></p>
           <p>{document.content}</p>
-          {document.pdfPath && (
-            <p><a href={document.pdfPath.startsWith('http') ? document.pdfPath : `${apiUrl}${document.pdfPath}`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
+          {document.pdfFile && (
+            <p><a href={`${apiUrl}/api/documents/${document._id}/pdf`} target="_blank" rel="noopener noreferrer">View PDF</a></p>
           )}
         </div>
       )}
@@ -228,7 +228,14 @@ function AdminPanel() {
       console.log('Response status:', response.status, response.statusText);
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const data = await response.json();
+          if (data.message) errorMessage = data.message;
+        } catch (e) {
+          // Response is not JSON, use default error message
+        }
+        throw new Error(errorMessage);
       }
       
       const data = await response.json();
@@ -245,8 +252,12 @@ function AdminPanel() {
     } catch (error) {
       console.error('Full error object:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('Error message:', errorMessage);
-      setMessage(`Failed to add document: ${errorMessage}. Verify API URL (⚙️).`);
+      
+      if (errorMessage === 'Failed to fetch') {
+        setMessage(`Failed to connect to API. Please check your network and API URL (⚙️). Currently using: ${apiUrl}`);
+      } else {
+        setMessage(`Error: ${errorMessage}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -347,21 +358,18 @@ function AppWrapper() {
   const [apiUrl, setApiUrl] = useState<string>(() => {
     const savedUrl = localStorage.getItem('apiUrl');
     
-    // Check if saved URL is a stale IP address that won't work
-    if (savedUrl && savedUrl.includes('10.123.17.183')) {
-      console.warn('Removing stale API URL from localStorage:', savedUrl);
+    // Check if saved URL is an IP address while we are on localhost
+    // This often happens when switching networks
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isSavedUrlIP = savedUrl && /http:\/\/\d+\.\d+\.\d+\.\d+/.test(savedUrl);
+    
+    if (isLocal && isSavedUrlIP && !savedUrl.includes('localhost') && !savedUrl.includes('127.0.0.1')) {
+      console.warn('Removing potentially stale IP API URL from localStorage:', savedUrl);
       localStorage.removeItem('apiUrl');
       return API_BASE_URL;
     }
     
     const url = savedUrl || API_BASE_URL;
-    console.log('Initializing API URL:', {
-      saved: savedUrl,
-      default: API_BASE_URL,
-      using: url,
-      hostname: window.location.hostname,
-      protocol: window.location.protocol
-    });
     return url;
   });
 

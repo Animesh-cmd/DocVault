@@ -5,8 +5,6 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,16 +17,20 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // MongoDB connection
 const mongoUri = process.env.MONGODB_URI;
 if (!mongoUri) {
-  console.error('Missing MONGODB_URI in environment. Check Backend/.env and dotenv path.');
+  console.error('Missing MONGODB_URI in environment.');
 } else {
   mongoose.connect(mongoUri)
-    .then(() => console.log('Connected to MongoDB'))
-    .catch(err => console.error('MongoDB connection error:', err));
+    .then(() => console.log('✅ Connected to MongoDB'))
+    .catch(err => console.error('❌ MongoDB connection error:', err));
 }
 
 // Document Schema
@@ -36,46 +38,27 @@ const documentSchema = new mongoose.Schema({
   referenceId: { type: String, required: true, unique: true },
   title: { type: String, required: true },
   content: { type: String, required: true },
-  pdfPath: { type: String },
+  pdfFile: {
+    data: Buffer,
+    contentType: String
+  },
   createdAt: { type: Date, default: Date.now }
 });
 
 const Document = mongoose.model('Document', documentSchema);
 
-// Cloudinary configuration
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+// Multer configuration for file uploads using memory storage
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
 });
-
-// Multer configuration for file uploads using Cloudinary
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'documents',
-    format: async (req, file) => 'pdf',
-    public_id: (req, file) => Date.now() + '-' + Math.round(Math.random() * 1E9)
-  },
-});
-
-const upload = multer({ storage });
-
-// Helper to extract Cloudinary public ID
-const getPublicIdFromUrl = (url) => {
-  if (!url || !url.includes('cloudinary.com')) return null;
-  const parts = url.split('/');
-  const filename = parts.pop();
-  const folder = parts.pop();
-  const publicIdWithExt = `${folder}/${filename}`;
-  return publicIdWithExt.replace(/\.[^/.]+$/, '');
-};
 
 // Search endpoint
 app.get('/api/search/:referenceId', async (req, res) => {
   try {
     const { referenceId } = req.params;
-    const document = await Document.findOne({ referenceId });
+    const document = await Document.findOne({ referenceId }, { 'pdfFile.data': 0 });
 
     if (document) {
       res.json({ success: true, document });
@@ -90,7 +73,7 @@ app.get('/api/search/:referenceId', async (req, res) => {
 // Get all documents (for admin panel)
 app.get('/api/documents', async (req, res) => {
   try {
-    const documents = await Document.find().sort({ createdAt: -1 });
+    const documents = await Document.find({}, { 'pdfFile.data': 0 }).sort({ createdAt: -1 });
     res.json({ success: true, documents });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -108,13 +91,16 @@ app.post('/api/documents', upload.single('pdf'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'Reference ID, title, and content are required' });
     }
     
-    const pdfPath = req.file ? req.file.path : null;
+    const pdfFile = req.file ? {
+      data: req.file.buffer,
+      contentType: req.file.mimetype
+    } : undefined;
 
     const newDocument = new Document({
       referenceId,
       title,
       content,
-      pdfPath
+      pdfFile
     });
 
     await newDocument.save();
@@ -135,18 +121,17 @@ app.put('/api/documents/:id', upload.single('pdf'), async (req, res) => {
   try {
     const { id } = req.params;
     const { referenceId, title, content } = req.body;
-    const pdfPath = req.file ? req.file.path : undefined;
 
     const document = await Document.findById(id);
     if (!document) return res.status(404).json({ success: false, message: 'Document not found' });
 
-    if (pdfPath && document.pdfPath) {
-      const publicId = getPublicIdFromUrl(document.pdfPath);
-      if (publicId) await cloudinary.uploader.destroy(publicId);
-    }
-
     const updateData = { referenceId, title, content };
-    if (pdfPath) updateData.pdfPath = pdfPath;
+    if (req.file) {
+      updateData.pdfFile = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype
+      };
+    }
 
     await Document.findByIdAndUpdate(id, updateData);
     res.json({ success: true, message: 'Document updated successfully' });
@@ -159,16 +144,40 @@ app.put('/api/documents/:id', upload.single('pdf'), async (req, res) => {
 app.delete('/api/documents/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const document = await Document.findById(id);
-    if (document && document.pdfPath) {
-      const publicId = getPublicIdFromUrl(document.pdfPath);
-      if (publicId) await cloudinary.uploader.destroy(publicId);
-    }
     await Document.findByIdAndDelete(id);
     res.json({ success: true, message: 'Document deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
+});
+
+// Serve PDF endpoint
+app.get('/api/documents/:id/pdf', async (req, res) => {
+  try {
+    const document = await Document.findById(req.params.id);
+    if (!document || !document.pdfFile || !document.pdfFile.data) {
+      return res.status(404).send('PDF not found');
+    }
+    
+    res.set('Content-Type', document.pdfFile.contentType);
+    res.send(document.pdfFile.data);
+  } catch (error) {
+    res.status(500).send('Server error');
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ success: false, message: 'File is too large. Maximum size is 15MB.' });
+    }
+    return res.status(400).json({ success: false, message: `Upload error: ${err.message}` });
+  }
+  
+  res.status(500).json({ success: false, message: `Internal server error: ${err.message}` });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
